@@ -16,7 +16,7 @@ import numpy as np
 import mujoco
 
 import xml.etree.ElementTree as ET
-from .labware_family import FAMILIES, sample, to_mjcf
+from .labware_family import FAMILIES, body_length, sample, to_mjcf
 
 def oversize_xml(p: dict, over=0.2e-3) -> str:
     """Hole built for a part shrunk by (clearance + over): the real part is
@@ -27,7 +27,11 @@ def oversize_xml(p: dict, over=0.2e-3) -> str:
         q["outer"] = p["outer"] - 2 * s
         q["corner_r"] = max(p["corner_r"] - s, 0.05e-3)
     else:
-        q["radius"] = p["radius"] - s
+        radius_at_mouth = p["radius"]
+        if p["family"] == "pcr":
+            taper = p.get("taper_length", .5*body_length(p))
+            radius_at_mouth *= .12 + .88*min(1., p["depth"]/taper)
+        q["radius"] = radius_at_mouth - s
     hole = ET.fromstring(to_mjcf(q))
     part = ET.fromstring(to_mjcf(p))
     for parent_path, selector in (("asset", "mesh"), ("worldbody", "body")):
@@ -60,12 +64,19 @@ def run_probe(xml: str, p: dict, dx: float, t_end=0.6):
     zs = np.array(zs)
     drop = z0 - zs[-1]                    # how far it went down
     # seated: dropped the full hole depth + spawn gap (minus 0.3 mm tolerance)
-    position_ok = np.linalg.norm(d.qpos[j:j + 2]) <= p["clearance"]
+    axis = d.body("peg").xmat.reshape(3, 3)[:, 2]
+    dz = drop - MM - body_length(p)/2
+    xy_at_mouth = d.qpos[j:j+2] + dz * axis[:2] / max(axis[2], 1e-6)
+    position_ok = np.linalg.norm(xy_at_mouth) <= p["clearance"]
     upright = d.body("peg").xmat.reshape(3, 3)[2, 2] > np.cos(np.deg2rad(3))
     seated = (abs(drop - p["depth"] - MM) < 0.3 * MM and position_ok and upright)
     tail = zs[-int(0.1 / m.opt.timestep):]
     jitter = tail.max() - tail.min()      # z motion in the last 100 ms
-    blocked = abs(drop - MM) < 0.3 * MM and position_ok and upright and d.ncon > 0
+    # A narrower tip can enter an undersized hole before the flank contacts its rim.
+    geom_names = {m.geom(g).name for c in d.contact for g in (c.geom1,c.geom2)}
+    touches_rim = any(name.startswith("plate_") for name in geom_names)
+    blocked = (MM - .3*MM <= drop < MM + p["depth"] - .3*MM
+               and touches_rim and "bottom" not in geom_names and upright and position_ok)
     finite = np.isfinite(zs).all() and np.isfinite(d.qpos).all() and not d.warning.number.any()
     return seated, blocked, jitter, finite
 

@@ -4,7 +4,7 @@ from xml.etree import ElementTree as ET
 import mujoco
 import numpy as np
 
-from .labware_family import sample, to_mjcf
+from .labware_family import body_length, sample, to_mjcf
 
 MODELS = Path(__file__).with_name("models")
 HOME = np.array([0., 0., 0., -np.pi/2, 0., np.pi/2, 0.])
@@ -22,7 +22,7 @@ class Workcell:
         width = p["outer"] if family == "cuvette" else 2*p["radius"]
         robot = ET.parse(MODELS / "fr3.xml").getroot()
         part = ET.fromstring(to_mjcf(p, spawn_height=GAP))
-        self.length = p["depth"] + .005
+        self.length = body_length(p)
         jaw = robot.find(".//body[@name='fr3_link7']")
         ET.SubElement(jaw, "site", name="grasp", pos="0 0 .165")
         ET.SubElement(jaw, "camera", name="wrist", pos=".035 0 .09", xyaxes="0 1 0 1 0 0")
@@ -86,7 +86,12 @@ class Workcell:
         d,j = self.data,self.j
         position = d.qpos[j:j+3] - self.seat
         tilt = np.arccos(np.clip(d.body("peg").xmat.reshape(3,3)[2,2],-1,1))
-        return np.linalg.norm(position[:2]), position[2], tilt
+        # Evaluate lateral error where the tube intersects the mouth. Its center
+        # may lie above a shallow rack and move farther when a seated tube tilts.
+        axis = d.body("peg").xmat.reshape(3, 3)[:, 2]
+        dz = self.params["depth"] - self.length/2 - position[2]
+        at_mouth = position[:2] + dz * axis[:2] / max(axis[2], 1e-6)
+        return np.linalg.norm(at_mouth), position[2], tilt
 
     def seated(self):
         xy,z,tilt = self.seat_errors()

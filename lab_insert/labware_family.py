@@ -1,20 +1,10 @@
-"""Parametric labware "sample + receptacle" families for mjfit (v0).
-
-Every call samples ONE assembly = (sample part, receptacle hole). Thousands of
-variants come from sampling the parameters, not from hand-made assets.
-
-!!! All nominal numbers below are PLACEHOLDERS. Replace each range with your
-    own caliper measurements (several brands / several racks), then widen by a
-    margin. The ranges, not the nominal values, are what the policy learns from.
-
-v0 limits (deliberate):
-  * Parts are straight extrusions (mjfit's model). The conical tip of
-    microtubes / PCR tubes and the conical PCR well are NOT modelled yet (v1).
-  * No cap / hinge, no neighbouring holes (v1: rack arrays for wrong-hole).
+"""Parametric collision envelopes for rigid closed labware in a straight rack.
+Tube contours are engineering approximations. See README for sources and limits.
 """
 from __future__ import annotations
 
 import math
+from xml.etree import ElementTree as ET
 import numpy as np
 import mjfit
 
@@ -46,14 +36,14 @@ FAMILIES = {
         depth=(15 * MM, 30 * MM),           # how deep it seats in the holder
         mass=(3e-3, 20e-3),                 # PS ... quartz, + liquid
     ),
-    # 1.5 / 2 mL microcentrifuge tube body in a rack hole (cylinder, v0).
+    # 2 mL round-bottom attached-cap tube; dimensions are provisional.
     "microtube": dict(
         radius=(5.2 * MM, 5.6 * MM),        # placeholder ~10.5-11 mm OD
         clearance=(0.20 * MM, 1.00 * MM),   # racks are usually loose
         depth=(10 * MM, 30 * MM),
         mass=(1e-3, 4e-3),                  # tube + liquid
     ),
-    # 0.2 mL PCR tube upper body in a well (cylinder, v0; real well is conical).
+    # Individual 0.2 mL PCR tube with tapered lower body.
     "pcr": dict(
         radius=(2.9 * MM, 3.1 * MM),        # placeholder ~6 mm OD
         clearance=(0.05 * MM, 0.30 * MM),
@@ -68,12 +58,16 @@ def sample(family: str, rng: np.random.Generator, **fixed) -> dict:
     spec = FAMILIES[family]
     p = {k: (fixed[k] if k in fixed else rng.uniform(*v)) for k, v in spec.items()}
     p["family"] = family
+    if family in ("microtube", "pcr"):
+        p["body_length"] = fixed.get("body_length", .039 if family == "microtube" else .01975)
+    if family == "pcr":
+        p["taper_length"] = fixed.get("taper_length", .5 * p["body_length"])
     p["friction"] = fixed.get("friction", float(np.exp(rng.uniform(np.log(0.25), np.log(2.0)))))
     return p
 
 
 def to_mjcf(p: dict, *, spawn_height=1 * MM, standalone=True) -> str:
-    """mjfit MJCF: the part is given; the hole is its exact outward offset."""
+    """Generate a straight rack opening and the family's external contact geometry."""
     if p["family"] == "cuvette":
         outline = rounded_rect(p["outer"], p["outer"], p["corner_r"])
         rim = 6 * MM
@@ -81,10 +75,10 @@ def to_mjcf(p: dict, *, spawn_height=1 * MM, standalone=True) -> str:
         outline = {"type": "circle", "radius": p["radius"],
                    "max_error": min(1e-4, 0.2 * p["clearance"])}
         rim = 4 * MM
-    return mjfit.peg(
+    xml = mjfit.peg(
         peg=outline,
         clearance=p["clearance"],
-        peg_length=p["depth"] + 5 * MM,      # part sticks out above the hole
+        peg_length=body_length(p),      # part sticks out above the hole
         plate_thickness=p["depth"],
         bottom_thickness=2 * MM,             # closed bottom = "seated" stop
         peg_mass=p["mass"],
@@ -93,3 +87,51 @@ def to_mjcf(p: dict, *, spawn_height=1 * MM, standalone=True) -> str:
         standalone=standalone,
         plate_size=None if p["family"] != "cuvette" else p["outer"] + 2 * rim,
     )
+
+    if p["family"] == "cuvette":
+        return xml
+    root = ET.fromstring(xml)
+    asset = root.find("asset")
+    body = root.find(".//body[@name='peg']")
+    body.remove(body.find("geom"))
+    asset.remove(asset.find("mesh[@name='peg_0']"))
+    r, length, mass = p["radius"], body_length(p), p["mass"]
+    bottom, top = -length / 2, length / 2
+    rgba = "0.80 0.87 0.93 1"
+
+    def geom(name, kind, z, fraction, **attrs):
+        ET.SubElement(body, "geom", name=name, type=kind, pos=f"0 0 {z}",
+                      rgba=rgba, mass=str(mass*fraction), **attrs)
+
+    if p["family"] == "microtube":
+        # Lower half of the sphere is exposed; its upper half lies within the barrel.
+        transition = bottom + r
+        geom("rounded_base", "sphere", transition, .12, size=str(r))
+    else:
+        taper = p.get("taper_length", .50 * length)
+        if not 0 < taper < length:
+            raise ValueError("taper_length must be between zero and tube length")
+        transition = bottom + taper
+        # Small blunt tip; convex frustum with circular sections.
+        rings = [(bottom, .12*r), (transition, r)]
+        vertices = [(rad*np.cos(a), rad*np.sin(a), z) for z,rad in rings
+                    for a in np.linspace(0,2*np.pi,64,endpoint=False)]
+        ET.SubElement(asset, "mesh", name="peg_taper",
+                      vertex=" ".join(f"{v:.12g}" for point in vertices for v in point))
+        geom("tapered_base", "mesh", 0, .12, mesh="peg_taper")
+
+    geom("barrel", "cylinder", (transition+top)/2, .80,
+         size=f"{r} {(top-transition)/2}")
+    # Closed cap and fixed hinge envelope. Moving lids need a separate joint model.
+    half_cap = .00045
+    geom("closed_cap", "cylinder", top+half_cap, .08, size=f"{1.14*r} {half_cap}")
+    ET.SubElement(body,"geom",name="hinge_tab",type="box",mass="0",rgba=rgba,
+                  pos=f"0 {1.07*r} {top}",size=f"{.26*r} {.20*r} {.0005}")
+    return ET.tostring(root, encoding="unicode")
+
+
+def body_length(p):
+    """Length below the cap, independent of the selected rack depth (metres)."""
+    if p["family"] == "cuvette":
+        return p["depth"] + 5*MM
+    return p.get("body_length", .039 if p["family"] == "microtube" else .01975)

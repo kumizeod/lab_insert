@@ -41,7 +41,14 @@ xy_error, axial_error, tilt = env.seat_errors()  # 评测器，单位 m、m、ra
 
 ## 仿真假设
 
-FR3 使用固定版本的 Menagerie 连杆惯性与碰撞网格。当前夹爪是可滑动的简化平行指，手指靠摩擦夹持；复位从零件位于两指间开始。首次部署前需替换为实际夹爪、标定实际控制响应。尺寸范围为占位值，PCR 与微量离心管仅近似为直圆柱，比色皿为圆角直棱柱。孔为竖直闭底单孔。模型暂未描述锥尖、盖铰链、弹性、转子倾角、孔阵列、训练好的策略或硬件控制。夹持和松爪测试跑通并不代表零样本迁移。
+FR3 使用固定版本的 Menagerie 连杆惯性与碰撞网格。当前夹爪是可滑动的简化平行指，手指靠摩擦夹持；复位从零件位于两指间开始。首次部署前需替换为实际夹爪、标定实际控制响应。
+
+### 耗材轮廓与适用边界
+
+- `microtube` 参考 [ABclonal AI03003，2 mL 圆底连盖离心管](https://img.abclonal.com.cn/abclonal/Datasheet/Other/AI03003.pdf)。以半球底、直筒身、闭合盖和固定连接片近似外部接触轮廓。
+- `pcr` 参考 [SARSTEDT 72.737.992，0.2 mL PCR 单管](https://customization.sarstedt.com/en/US/c/life-science/pcr-and-molecular-biology/pcr-single-tubes/p/pcr-single-tubes-0-2-ml-and-0-5-ml/72.737.992)。厂商列出锥底、平盖及产品高度 20.65 mm。模型以直筒上段、钝尖圆台下段、固定闭盖近似。
+- 厂商描述支持底型；半球曲率、锥长、夹持段直径、铰链尺寸和质量分配是仿真假设，需对实际货号测量。比色皿仍用圆角方柱。
+- 配套件当前为通用竖直闭底直孔架。热循环仪的锥孔和离心机转子的倾角、孔深、落座面需独立建模。管壁弹性、开盖状态及活动铰链尚未建模。
 
 第三方模型来源和许可证见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
