@@ -1,4 +1,4 @@
-"""Parametric collision envelopes for rigid closed labware in a straight rack.
+"""Parametric collision envelopes for rigid labware in a straight rack.
 Tube contours are engineering approximations. See README for sources and limits.
 """
 from __future__ import annotations
@@ -53,13 +53,37 @@ FAMILIES = {
 }
 
 
-def sample(family: str, rng: np.random.Generator, **fixed) -> dict:
+# SKU -> (nominal capacity mL, outside diameter mm, catalog height mm).
+# See README for sources and the assumed cap contribution to total height.
+ROUND_TUBES = {
+    "YA1030": (5, 13.5, 56.0),
+    "DC7MCT-5ML": (5, 13.5, 53.5),
+    "HR10005": (2, 10.63, 41.91),
+    "HR10024": (5, 13.8, 52.37),
+    "HR10007": (7, 15.63, 62.41),
+    "HR10023": (10, 16.9, 82.24),
+}
+
+
+def sample(family: str, rng: np.random.Generator, *, sku=None, cap_state=None, **fixed) -> dict:
     """One assembly's parameters (dict). `fixed` overrides any sampled value."""
     spec = FAMILIES[family]
     p = {k: (fixed[k] if k in fixed else rng.uniform(*v)) for k, v in spec.items()}
     p["family"] = family
-    if family in ("microtube", "pcr"):
-        p["body_length"] = fixed.get("body_length", .039 if family == "microtube" else .01975)
+    if family == "microtube":
+        sku = "YA1030" if sku is None else sku
+        capacity, diameter, height = ROUND_TUBES[sku]
+        p.update(sku=sku, capacity_ml=capacity, radius=fixed.get("radius", diameter*MM/2),
+                 body_length=fixed.get("body_length", (height-.9)*MM),
+                 cap_state="open" if cap_state is None else cap_state)
+        if p["cap_state"] not in ("open", "closed"):
+            raise ValueError("cap_state must be open or closed")
+        # Generic single-hole fixture; depth and clearance are engineering settings.
+        p["depth"] = fixed.get("depth", p["body_length"] * rng.uniform(.57,.68))
+    elif sku is not None or cap_state is not None:
+        raise ValueError("sku and cap_state are specific to round-bottom flip-cap tubes")
+    if family == "pcr":
+        p["body_length"] = fixed.get("body_length", .01975)
     if family == "pcr":
         p["taper_length"] = fixed.get("taper_length", .5 * p["body_length"])
     p["friction"] = fixed.get("friction", float(np.exp(rng.uniform(np.log(0.25), np.log(2.0)))))
@@ -120,10 +144,28 @@ def to_mjcf(p: dict, *, spawn_height=1 * MM, standalone=True) -> str:
                       vertex=" ".join(f"{v:.12g}" for point in vertices for v in point))
         geom("tapered_base", "mesh", 0, .12, mesh="peg_taper")
 
-    geom("barrel", "cylinder", (transition+top)/2, .80,
-         size=f"{r} {(top-transition)/2}")
+    barrel_top = top - .0012 if p.get("cap_state") == "open" else top
+    geom("barrel", "cylinder", (transition+barrel_top)/2, .80,
+         size=f"{r} {(barrel_top-transition)/2}")
     # Closed cap and fixed hinge envelope. Moving lids need a separate joint model.
     half_cap = .00045
+    if p.get("cap_state") == "open":
+        # Photo-style fixed open pose; the lid disk lies beside the mouth.
+        # An annular lip and recessed barrel surface make the mouth visible.
+        for i in range(24):
+            angle = 2*np.pi*i/24
+            ET.SubElement(body, "geom", name=f"lip_{i}", type="box", mass="0",
+                          pos=f"{.97*r*np.cos(angle)} {.97*r*np.sin(angle)} {top-.0006}",
+                          quat=f"{np.cos(angle/2)} 0 0 {np.sin(angle/2)}",
+                          size=f"{.045*r} {.14*r} .0006", rgba=rgba)
+        lid_y = 2.65 * r
+        ET.SubElement(body, "geom", name="open_cap", type="cylinder", rgba=rgba,
+                      pos=f"0 {lid_y} {top}", size=f"{1.14*r} {half_cap}",
+                      mass=str(.075*mass))
+        ET.SubElement(body, "geom", name="hinge_tab", type="box", rgba=rgba,
+                      pos=f"0 {1.27*r} {top}", size=f"{.22*r} {.36*r} {.0004}",
+                      mass=str(.005*mass))
+        return ET.tostring(root, encoding="unicode")
     geom("closed_cap", "cylinder", top+half_cap, .08, size=f"{1.14*r} {half_cap}")
     ET.SubElement(body,"geom",name="hinge_tab",type="box",mass="0",rgba=rgba,
                   pos=f"0 {1.07*r} {top}",size=f"{.26*r} {.20*r} {.0005}")
@@ -135,3 +177,10 @@ def body_length(p):
     if p["family"] == "cuvette":
         return p["depth"] + 5*MM
     return p.get("body_length", .039 if p["family"] == "microtube" else .01975)
+
+
+def lateral_tolerance(p):
+    """Include the polygonal rack approximation and 10 um soft-contact allowance."""
+    if p["family"] == "microtube":
+        return p["clearance"] + min(.0001, .2*p["clearance"]) + .00001
+    return p["clearance"]

@@ -45,10 +45,32 @@ FR3 使用固定版本的 Menagerie 连杆惯性与碰撞网格。当前夹爪�
 
 ### 耗材轮廓与适用边界
 
-- `microtube` 参考 [ABclonal AI03003，2 mL 圆底连盖离心管](https://img.abclonal.com.cn/abclonal/Datasheet/Other/AI03003.pdf)。以半球底、直筒身、闭合盖和固定连接片近似外部接触轮廓。
+- `microtube` 用长直管身、圆底和侧连翻盖表示这一类，默认 **5 mL YA1030 参考尺寸、固定开盖**。图片用于辨认外形，具体品牌与尺寸待实测。局部插入从已经夹持、位于孔口附近开始。开盖外包络包含偏心盖片、连接带和管口边缘；内部用封闭碰撞体简化。另可选固定闭盖。
 - `pcr` 参考 [SARSTEDT 72.737.992，0.2 mL PCR 单管](https://customization.sarstedt.com/en/US/c/life-science/pcr-and-molecular-biology/pcr-single-tubes/p/pcr-single-tubes-0-2-ml-and-0-5-ml/72.737.992)。厂商列出锥底、平盖及产品高度 20.65 mm。模型以直筒上段、钝尖圆台下段、固定闭盖近似。
 - 厂商描述支持底型；半球曲率、锥长、夹持段直径、铰链尺寸和质量分配是仿真假设，需对实际货号测量。比色皿仍用圆角方柱。
 - 配套件当前为通用竖直闭底直孔架。热循环仪的锥孔和离心机转子的倾角、孔深、落座面需独立建模。管壁弹性、开盖状态及活动铰链尚未建模。
 
 第三方模型来源和许可证见 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
+
+## 圆底侧连盖规格
+
+| 厂商货号 | 容量 mL | 管外径 mm | 目录高度/长度 mm |
+|---|---:|---:|---:|
+| Solarbio YA1030（默认参考） | 5 | 13.5 | 56，含盖 |
+| 宇灿 DC7MCT-5ML | 5 | 13.5 | 53.5，闭盖 |
+| DUSHENG HR10005 | 2 | 10.63 | 41.91 |
+| DUSHENG HR10024 | 5 | 13.8 | 52.37 |
+| DUSHENG HR10007 | 7 | 15.63 | 62.41 |
+| DUSHENG HR10023 | 10 | 16.9 | 82.24 |
+
+[索莱宝规格](https://www.solarbio.com/goods.php?id=1630) · [宇灿规格](https://www.shyucanbio.com/product/4896383/) · [DUSHENG 尺寸表](https://www.lenglab.com/centrifuge-tube-series/centrifuge-tube.html)
+
+同一货号使用一对目录外径和高度。模型暂按目录高度扣除 0.9 mm 盖厚估计管身长。固定开盖角度、实际连接带长度、空管质量、圆底曲率与夹具参数均需实测；各货号共享简化外形。不同 seed 改变工位配合和动力学，货号由调用者选择，可按货号划分训练/留出集。
+
+```sh
+python -m lab_insert.baseline --family microtube --sku YA1030 --cap-state open
+python -m lab_insert.drop_test --sku YA1030 --n 100
+```
+
+![默认 5 mL 开盖局部插入模型](docs/round-tube-5ml.png)

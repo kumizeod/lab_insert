@@ -2,7 +2,7 @@
 import argparse
 import numpy as np
 import mujoco
-from .labware_family import FAMILIES
+from .labware_family import FAMILIES, ROUND_TUBES
 from .workcell import Workcell, GAP
 
 
@@ -13,7 +13,7 @@ def aligned_trial(env):
     jac = np.zeros((6, m.nv))
     depth = env.params["depth"] + GAP
     started_held = env.seat_errors()[1] > depth - .001
-    for k in range(200):
+    for k in range(max(200, int(np.ceil(depth/.00025))+80)):
         desired = origin.copy()
         desired[2] -= min((k+1)*.00025, depth)
         mujoco.mj_jacSite(m, d, jac[:3], jac[3:], site)
@@ -35,8 +35,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--family", choices=FAMILIES, default="cuvette")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--sku", choices=tuple(ROUND_TUBES))
+    parser.add_argument("--cap-state", choices=("open","closed"))
     args = parser.parse_args()
-    env = Workcell(args.family, args.seed)
+    env = Workcell(args.family, args.seed, sku=args.sku, cap_state=args.cap_state)
     checks = aligned_trial(env)
     xy,z,tilt = env.seat_errors()
     print(f"held / seated / released and seated = {checks}; "

@@ -15,7 +15,7 @@ class TubeProfileTest(unittest.TestCase):
                 xml = to_mjcf(p)
                 model = mujoco.MjModel.from_xml_string(xml)
                 self.assertAlmostEqual(model.body("peg").mass[0], p["mass"])
-                self.assertGreater(model.geom("closed_cap").size[0], p["radius"])
+                self.assertGreater(model.geom("open_cap" if family == "microtube" else "closed_cap").size[0], p["radius"])
                 if family == "microtube":
                     self.assertEqual(model.geom("rounded_base").type[0], mujoco.mjtGeom.mjGEOM_SPHERE)
                 else:
